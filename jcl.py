@@ -528,8 +528,9 @@ def get_int(json_object: JsonObject, key: str, *, default: int = 0) -> int:
 
     value: object = json_object[key]
 
-    if isinstance(value, bool)\
-        or (not isinstance(value, int)):
+    if (isinstance(value, bool)
+        or (not isinstance(value, int))
+        ):
         return default
 
     return cast(int, value)
