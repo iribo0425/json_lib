@@ -2,15 +2,15 @@ import json
 import math
 import pathlib
 from dataclasses import dataclass
-from typing import cast, ClassVar, NoReturn, Protocol, Self, Iterable, TypeAlias, TypeVar
+from typing import cast, ClassVar, Iterable, NoReturn, Optional, Protocol, TypeVar, Union
 
-JsonPrimitive: TypeAlias = str | int | float | bool | None
-JsonObject: TypeAlias = dict[str, "JsonValue"]
-JsonArray: TypeAlias = list["JsonValue"]
-JsonValue: TypeAlias = JsonObject | JsonArray | JsonPrimitive
+JsonPrimitive = Optional[Union[str, int, float, bool]]
+JsonObject = dict[str, "JsonValue"]
+JsonArray = list["JsonValue"]
+JsonValue = Union[JsonObject, JsonArray, JsonPrimitive]
 
-JsonValuePathPart: TypeAlias = str | int
-JsonValuePath: TypeAlias = tuple[JsonValuePathPart, ...]
+JsonValuePathPart = Union[str, int]
+JsonValuePath = tuple[JsonValuePathPart, ...]
 
 def default_json_primitive() -> JsonPrimitive:
     """Returns the default JSON primitive.
@@ -154,15 +154,16 @@ class JsonValueContext(object):
         """
         return JsonValueContext(self.get_path() + (path_part,), self.get_max_depth())
 
-def _normalize_json_value_context(ctx: JsonValueContext | None) -> JsonValueContext:
+def _normalize_json_value_context(ctx: Optional[JsonValueContext]) -> JsonValueContext:
     if ctx is None:
         return JsonValueContext()
 
     if not isinstance(ctx, JsonValueContext):
-        raise TypeError(f"Expected JsonValueContext | None, got {type(ctx).__name__}")
+        raise TypeError(f"Expected Optional[JsonValueContext], got {type(ctx).__name__}")
 
     return ctx
 
+T_JsonObjectConvertible = TypeVar("T_JsonObjectConvertible", bound="JsonObjectConvertible")
 class JsonObjectConvertible(Protocol):
     """Protocol for objects that can be converted to and from JSON objects."""
     def to_json_object(self) -> JsonObject:
@@ -174,7 +175,7 @@ class JsonObjectConvertible(Protocol):
         ...
 
     @classmethod
-    def from_json_object(cls: type[Self], json_object: JsonObject, *, ctx: JsonValueContext | None = None) -> Self:
+    def from_json_object(cls: type[T_JsonObjectConvertible], json_object: JsonObject, *, ctx: Optional[JsonValueContext] = None) -> T_JsonObjectConvertible:
         """Creates a convertible from a JSON object.
 
         Args:
@@ -251,7 +252,7 @@ class JsonValueError(ValueError):
 
         return f"{reason} at {at}"
 
-def validate_json_primitive(x: object, *, ctx: JsonValueContext | None = None) -> None:
+def validate_json_primitive(x: object, *, ctx: Optional[JsonValueContext] = None) -> None:
     """Validates that a value is a JSON primitive.
 
     Accepted values are ``None``, ``bool``, ``str``, integers, and finite floating-point values.
@@ -289,7 +290,7 @@ def validate_json_primitive(x: object, *, ctx: JsonValueContext | None = None) -
 
     raise JsonValueError(f"Invalid primitive: {type(x).__name__} value={x!r}", ctx.get_path())
 
-@dataclass(frozen=True, slots=True)
+@dataclass(frozen=True)
 class _StackItem:
     discard: bool
     oid: int
@@ -300,7 +301,7 @@ class _StackItem:
     DUMMY_OID: ClassVar[int] = -1
     DUMMY_VALUE: ClassVar[object] = object()
 
-def validate_json_value(x: object, *, ctx: JsonValueContext | None = None) -> None:
+def validate_json_value(x: object, *, ctx: Optional[JsonValueContext] = None) -> None:
     """Validates that a value is a JSON value.
 
     This validator traverses nested objects and arrays iteratively, enforces a maximum nesting depth, rejects non-string object keys, and detects cycles in container graphs.
@@ -367,7 +368,7 @@ def validate_json_value(x: object, *, ctx: JsonValueContext | None = None) -> No
         else:
             validate_json_primitive(item.value, ctx=JsonValueContext(item.path, ctx.get_max_depth()))
 
-def validate_json_object(x: object, *, ctx: JsonValueContext | None = None) -> None:
+def validate_json_object(x: object, *, ctx: Optional[JsonValueContext] = None) -> None:
     """Validates that a value is a JSON object.
 
     Args:
@@ -388,7 +389,7 @@ def validate_json_object(x: object, *, ctx: JsonValueContext | None = None) -> N
 
     validate_json_value(x, ctx=ctx)
 
-def validate_json_array(x: object, *, ctx: JsonValueContext | None = None) -> None:
+def validate_json_array(x: object, *, ctx: Optional[JsonValueContext] = None) -> None:
     """Validates that a value is a JSON array.
 
     Args:
@@ -409,7 +410,7 @@ def validate_json_array(x: object, *, ctx: JsonValueContext | None = None) -> No
 
     validate_json_value(x, ctx=ctx)
 
-def dump_convertible(convertible: JsonObjectConvertible, path: pathlib.Path, *, ctx: JsonValueContext | None = None) -> None:
+def dump_convertible(convertible: JsonObjectConvertible, path: pathlib.Path, *, ctx: Optional[JsonValueContext] = None) -> None:
     """Writes a convertible to a UTF-8 JSON file.
 
     The result of ``to_json_object()`` is validated before writing so that invalid JSON objects are rejected early.
@@ -450,7 +451,7 @@ def _parse_constant(s: str) -> NoReturn:
     raise ValueError(f"Invalid JSON constant: {s}")
 
 T = TypeVar("T", bound=JsonObjectConvertible)
-def load_convertible(cls: type[T], path: pathlib.Path, *, ctx: JsonValueContext | None = None) -> T:
+def load_convertible(cls: type[T], path: pathlib.Path, *, ctx: Optional[JsonValueContext] = None) -> T:
     """Loads a convertible from a JSON file.
 
     Parsing rejects non-finite floats and invalid JSON constants before JSON object validation and deserialization begin.
@@ -501,7 +502,7 @@ def get_str_from_json_object(obj: JsonObject, key: str, *, default: str = "") ->
     if key not in obj:
         return default
 
-    value: object | None = obj[key]
+    value: Optional[object] = obj[key]
 
     if not isinstance(value, str):
         return default
@@ -524,7 +525,7 @@ def get_int_from_json_object(obj: JsonObject, key: str, *, default: int = 0) -> 
     if key not in obj:
         return default
 
-    value: object | None = obj[key]
+    value: Optional[object] = obj[key]
 
     if isinstance(value, bool)\
         or (not isinstance(value, int)):
@@ -549,7 +550,7 @@ def get_float_from_json_object(obj: JsonObject, key: str, *, default: float = 0.
     if key not in obj:
         return default
 
-    value: object | None = obj[key]
+    value: Optional[object] = obj[key]
 
     if isinstance(value, bool):
         return default
@@ -582,14 +583,14 @@ def get_bool_from_json_object(obj: JsonObject, key: str, *, default: bool = Fals
     if key not in obj:
         return default
 
-    value: object | None = obj[key]
+    value: Optional[object] = obj[key]
 
     if not isinstance(value, bool):
         return default
 
     return cast(bool, value)
 
-def get_primitive_from_json_object(obj: JsonObject, key: str, *, default: JsonPrimitive = default_json_primitive(), ctx: JsonValueContext | None = None) -> JsonPrimitive:
+def get_primitive_from_json_object(obj: JsonObject, key: str, *, default: JsonPrimitive = default_json_primitive(), ctx: Optional[JsonValueContext] = None) -> JsonPrimitive:
     """Gets a JSON primitive from a JSON object.
 
     Args:
@@ -610,7 +611,7 @@ def get_primitive_from_json_object(obj: JsonObject, key: str, *, default: JsonPr
     if key not in obj:
         return default
 
-    value: object | None = obj[key]
+    value: Optional[object] = obj[key]
 
     try:
         validate_json_primitive(value, ctx=child_ctx)
@@ -619,7 +620,7 @@ def get_primitive_from_json_object(obj: JsonObject, key: str, *, default: JsonPr
 
     return cast(JsonPrimitive, value)
 
-def get_value_from_json_object(obj: JsonObject, key: str, *, default: JsonValue = default_json_value(), ctx: JsonValueContext | None = None) -> JsonValue:
+def get_value_from_json_object(obj: JsonObject, key: str, *, default: JsonValue = default_json_value(), ctx: Optional[JsonValueContext] = None) -> JsonValue:
     """Gets a JSON value from a JSON object.
 
     Args:
@@ -640,7 +641,7 @@ def get_value_from_json_object(obj: JsonObject, key: str, *, default: JsonValue 
     if key not in obj:
         return default
 
-    value: object | None = obj[key]
+    value: Optional[object] = obj[key]
 
     try:
         validate_json_value(value, ctx=child_ctx)
@@ -661,7 +662,7 @@ class Factory(Protocol[T_co]):
         """
         ...
 
-def get_object_from_json_object(obj: JsonObject, key: str, *, default_factory: Factory[JsonObject] = dict, ctx: JsonValueContext | None = None) -> JsonObject:
+def get_object_from_json_object(obj: JsonObject, key: str, *, default_factory: Factory[JsonObject] = dict, ctx: Optional[JsonValueContext] = None) -> JsonObject:
     """Gets a JSON object from a JSON object.
 
     Args:
@@ -682,7 +683,7 @@ def get_object_from_json_object(obj: JsonObject, key: str, *, default_factory: F
     if key not in obj:
         return default_factory()
 
-    value: object | None = obj[key]
+    value: Optional[object] = obj[key]
 
     try:
         validate_json_object(value, ctx=child_ctx)
@@ -691,7 +692,7 @@ def get_object_from_json_object(obj: JsonObject, key: str, *, default_factory: F
 
     return cast(JsonObject, value)
 
-def get_array_from_json_object(obj: JsonObject, key: str, *, default_factory: Factory[JsonArray] = list, ctx: JsonValueContext | None = None) -> JsonArray:
+def get_array_from_json_object(obj: JsonObject, key: str, *, default_factory: Factory[JsonArray] = list, ctx: Optional[JsonValueContext] = None) -> JsonArray:
     """Gets a JSON array from a JSON object.
 
     Args:
@@ -712,7 +713,7 @@ def get_array_from_json_object(obj: JsonObject, key: str, *, default_factory: Fa
     if key not in obj:
         return default_factory()
 
-    value: object | None = obj[key]
+    value: Optional[object] = obj[key]
 
     try:
         validate_json_array(value, ctx=child_ctx)
@@ -722,7 +723,7 @@ def get_array_from_json_object(obj: JsonObject, key: str, *, default_factory: Fa
     return cast(JsonArray, value)
 
 T = TypeVar("T", bound=JsonObjectConvertible)
-def get_convertible_from_json_object(obj: JsonObject, key: str, cls: type[T], default_factory: Factory[T], *, ctx: JsonValueContext | None = None) -> T:
+def get_convertible_from_json_object(obj: JsonObject, key: str, cls: type[T], default_factory: Factory[T], *, ctx: Optional[JsonValueContext] = None) -> T:
     """Gets a convertible from a JSON object.
 
     Args:
@@ -744,7 +745,7 @@ def get_convertible_from_json_object(obj: JsonObject, key: str, cls: type[T], de
     if key not in obj:
         return default_factory()
 
-    value: object | None = obj[key]
+    value: Optional[object] = obj[key]
 
     try:
         validate_json_object(value, ctx=child_ctx)
@@ -753,7 +754,7 @@ def get_convertible_from_json_object(obj: JsonObject, key: str, cls: type[T], de
         return default_factory()
 
 T = TypeVar("T", bound=JsonObjectConvertible)
-def get_convertibles_from_json_object(obj: JsonObject, key: str, cls: type[T], *, default_factory: Factory[list[T]] = list, ctx: JsonValueContext | None = None) -> list[T]:
+def get_convertibles_from_json_object(obj: JsonObject, key: str, cls: type[T], *, default_factory: Factory[list[T]] = list, ctx: Optional[JsonValueContext] = None) -> list[T]:
     """Gets a list of convertibles from a JSON object.
 
     Args:
@@ -774,7 +775,7 @@ def get_convertibles_from_json_object(obj: JsonObject, key: str, cls: type[T], *
     if key not in obj:
         return default_factory()
 
-    value: object | None = obj[key]
+    value: Optional[object] = obj[key]
 
     array_ctx: JsonValueContext = ctx.create_child(key)
 
@@ -792,7 +793,7 @@ def get_convertibles_from_json_object(obj: JsonObject, key: str, cls: type[T], *
     except (JsonValueError, TypeError, ValueError):
         return default_factory()
 
-def _require_value_from_json_object(obj: JsonObject, key: str, *, ctx: JsonValueContext | None = None) -> object | None:
+def _require_value_from_json_object(obj: JsonObject, key: str, *, ctx: Optional[JsonValueContext] = None) -> Optional[object]:
     ctx: JsonValueContext = _normalize_json_value_context(ctx)
     child_ctx: JsonValueContext = ctx.create_child(key)
 
@@ -801,7 +802,7 @@ def _require_value_from_json_object(obj: JsonObject, key: str, *, ctx: JsonValue
 
     return obj[key]
 
-def require_str_from_json_object(obj: JsonObject, key: str, *, ctx: JsonValueContext | None = None) -> str:
+def require_str_from_json_object(obj: JsonObject, key: str, *, ctx: Optional[JsonValueContext] = None) -> str:
     """Gets a required string from a JSON object.
 
     Args:
@@ -819,14 +820,14 @@ def require_str_from_json_object(obj: JsonObject, key: str, *, ctx: JsonValueCon
     ctx: JsonValueContext = _normalize_json_value_context(ctx)
     child_ctx: JsonValueContext = ctx.create_child(key)
 
-    value: object | None = _require_value_from_json_object(obj, key, ctx=ctx)
+    value: Optional[object] = _require_value_from_json_object(obj, key, ctx=ctx)
 
     if not isinstance(value, str):
         raise JsonValueError(f"Expected string, got {type(value).__name__}", child_ctx.get_path())
 
     return value
 
-def require_int_from_json_object(obj: JsonObject, key: str, *, ctx: JsonValueContext | None = None) -> int:
+def require_int_from_json_object(obj: JsonObject, key: str, *, ctx: Optional[JsonValueContext] = None) -> int:
     """Gets a required integer from a JSON object.
 
     Booleans are rejected explicitly.
@@ -846,14 +847,14 @@ def require_int_from_json_object(obj: JsonObject, key: str, *, ctx: JsonValueCon
     ctx: JsonValueContext = _normalize_json_value_context(ctx)
     child_ctx: JsonValueContext = ctx.create_child(key)
 
-    value: object | None = _require_value_from_json_object(obj, key, ctx=ctx)
+    value: Optional[object] = _require_value_from_json_object(obj, key, ctx=ctx)
 
     if isinstance(value, bool) or (not isinstance(value, int)):
         raise JsonValueError(f"Expected integer, got {type(value).__name__}", child_ctx.get_path())
 
     return value
 
-def require_float_from_json_object(obj: JsonObject, key: str, *, ctx: JsonValueContext | None = None) -> float:
+def require_float_from_json_object(obj: JsonObject, key: str, *, ctx: Optional[JsonValueContext] = None) -> float:
     """Gets a required finite number from a JSON object as ``float``.
 
     Integers are accepted and converted to ``float``.
@@ -874,7 +875,7 @@ def require_float_from_json_object(obj: JsonObject, key: str, *, ctx: JsonValueC
     ctx: JsonValueContext = _normalize_json_value_context(ctx)
     child_ctx: JsonValueContext = ctx.create_child(key)
 
-    value: object | None = _require_value_from_json_object(obj, key, ctx=ctx)
+    value: Optional[object] = _require_value_from_json_object(obj, key, ctx=ctx)
 
     if isinstance(value, bool):
         raise JsonValueError("Expected number, got bool", child_ctx.get_path())
@@ -893,7 +894,7 @@ def require_float_from_json_object(obj: JsonObject, key: str, *, ctx: JsonValueC
 
     raise JsonValueError(f"Expected number, got {type(value).__name__}", child_ctx.get_path())
 
-def require_bool_from_json_object(obj: JsonObject, key: str, *, ctx: JsonValueContext | None = None) -> bool:
+def require_bool_from_json_object(obj: JsonObject, key: str, *, ctx: Optional[JsonValueContext] = None) -> bool:
     """Gets a required boolean from a JSON object.
 
     Args:
@@ -911,14 +912,14 @@ def require_bool_from_json_object(obj: JsonObject, key: str, *, ctx: JsonValueCo
     ctx: JsonValueContext = _normalize_json_value_context(ctx)
     child_ctx: JsonValueContext = ctx.create_child(key)
 
-    value: object | None = _require_value_from_json_object(obj, key, ctx=ctx)
+    value: Optional[object] = _require_value_from_json_object(obj, key, ctx=ctx)
 
     if not isinstance(value, bool):
         raise JsonValueError(f"Expected boolean, got {type(value).__name__}", child_ctx.get_path())
 
     return value
 
-def require_primitive_from_json_object(obj: JsonObject, key: str, *, ctx: JsonValueContext | None = None) -> JsonPrimitive:
+def require_primitive_from_json_object(obj: JsonObject, key: str, *, ctx: Optional[JsonValueContext] = None) -> JsonPrimitive:
     """Gets a required JSON primitive from a JSON object.
 
     Args:
@@ -935,11 +936,11 @@ def require_primitive_from_json_object(obj: JsonObject, key: str, *, ctx: JsonVa
     """
     ctx: JsonValueContext = _normalize_json_value_context(ctx)
     child_ctx: JsonValueContext = ctx.create_child(key)
-    value: object | None = _require_value_from_json_object(obj, key, ctx=ctx)
+    value: Optional[object] = _require_value_from_json_object(obj, key, ctx=ctx)
     validate_json_primitive(value, ctx=child_ctx)
     return cast(JsonPrimitive, value)
 
-def require_value_from_json_object(obj: JsonObject, key: str, *, ctx: JsonValueContext | None = None) -> JsonValue:
+def require_value_from_json_object(obj: JsonObject, key: str, *, ctx: Optional[JsonValueContext] = None) -> JsonValue:
     """Gets a required JSON value from a JSON object.
 
     Args:
@@ -956,11 +957,11 @@ def require_value_from_json_object(obj: JsonObject, key: str, *, ctx: JsonValueC
     """
     ctx: JsonValueContext = _normalize_json_value_context(ctx)
     child_ctx: JsonValueContext = ctx.create_child(key)
-    value: object | None = _require_value_from_json_object(obj, key, ctx=ctx)
+    value: Optional[object] = _require_value_from_json_object(obj, key, ctx=ctx)
     validate_json_value(value, ctx=child_ctx)
     return value
 
-def require_object_from_json_object(obj: JsonObject, key: str, *, ctx: JsonValueContext | None = None) -> JsonObject:
+def require_object_from_json_object(obj: JsonObject, key: str, *, ctx: Optional[JsonValueContext] = None) -> JsonObject:
     """Gets a required JSON object from a JSON object.
 
     Args:
@@ -977,11 +978,11 @@ def require_object_from_json_object(obj: JsonObject, key: str, *, ctx: JsonValue
     """
     ctx: JsonValueContext = _normalize_json_value_context(ctx)
     child_ctx: JsonValueContext = ctx.create_child(key)
-    value: object | None = _require_value_from_json_object(obj, key, ctx=ctx)
+    value: Optional[object] = _require_value_from_json_object(obj, key, ctx=ctx)
     validate_json_object(value, ctx=child_ctx)
     return cast(JsonObject, value)
 
-def require_array_from_json_object(obj: JsonObject, key: str, *, ctx: JsonValueContext | None = None) -> JsonArray:
+def require_array_from_json_object(obj: JsonObject, key: str, *, ctx: Optional[JsonValueContext] = None) -> JsonArray:
     """Gets a required JSON array from a JSON object.
 
     Args:
@@ -998,12 +999,12 @@ def require_array_from_json_object(obj: JsonObject, key: str, *, ctx: JsonValueC
     """
     ctx: JsonValueContext = _normalize_json_value_context(ctx)
     child_ctx: JsonValueContext = ctx.create_child(key)
-    value: object | None = _require_value_from_json_object(obj, key, ctx=ctx)
+    value: Optional[object] = _require_value_from_json_object(obj, key, ctx=ctx)
     validate_json_array(value, ctx=child_ctx)
     return cast(JsonArray, value)
 
 T = TypeVar("T", bound=JsonObjectConvertible)
-def require_convertible_from_json_object(obj: JsonObject, key: str, cls: type[T], *, ctx: JsonValueContext | None = None) -> T:
+def require_convertible_from_json_object(obj: JsonObject, key: str, cls: type[T], *, ctx: Optional[JsonValueContext] = None) -> T:
     """Gets a required convertible from a JSON object.
 
     Args:
@@ -1022,12 +1023,12 @@ def require_convertible_from_json_object(obj: JsonObject, key: str, cls: type[T]
     """
     ctx: JsonValueContext = _normalize_json_value_context(ctx)
     child_ctx: JsonValueContext = ctx.create_child(key)
-    value: object | None = _require_value_from_json_object(obj, key, ctx=ctx)
+    value: Optional[object] = _require_value_from_json_object(obj, key, ctx=ctx)
     validate_json_object(value, ctx=child_ctx)
     return cls.from_json_object(cast(JsonObject, value), ctx=child_ctx)
 
 T = TypeVar("T", bound=JsonObjectConvertible)
-def require_convertibles_from_json_object(obj: JsonObject, key: str, cls: type[T], *, ctx: JsonValueContext | None = None) -> list[T]:
+def require_convertibles_from_json_object(obj: JsonObject, key: str, cls: type[T], *, ctx: Optional[JsonValueContext] = None) -> list[T]:
     """Gets a required list of convertibles from a JSON object.
 
     Args:
@@ -1046,7 +1047,7 @@ def require_convertibles_from_json_object(obj: JsonObject, key: str, cls: type[T
     """
     ctx: JsonValueContext = _normalize_json_value_context(ctx)
 
-    value: object | None = _require_value_from_json_object(obj, key, ctx=ctx)
+    value: Optional[object] = _require_value_from_json_object(obj, key, ctx=ctx)
 
     array_ctx: JsonValueContext = ctx.create_child(key)
     validate_json_array(value, ctx=array_ctx)
