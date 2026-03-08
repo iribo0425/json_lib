@@ -58,9 +58,9 @@ from dataclasses import dataclass
 from jcl import (
     JsonObject,
     JsonObjectConvertible,
-    get_bool_from_json_object,
-    get_int_from_json_object,
-    get_str_from_json_object,
+    get_bool,
+    get_int,
+    get_str,
 )
 
 @dataclass
@@ -79,9 +79,9 @@ class UserSettings(JsonObjectConvertible):
     @classmethod
     def from_json_object(cls, json_object: JsonObject, *, ctx=None) -> "UserSettings":
         return cls(
-            theme=get_str_from_json_object(json_object, "theme", default="dark"),
-            max_item_count=get_int_from_json_object(json_object, "max_item_count", default=20),
-            show_tips=get_bool_from_json_object(json_object, "show_tips", default=True),
+            theme=get_str(json_object, "theme", default="dark"),
+            max_item_count=get_int(json_object, "max_item_count", default=20),
+            show_tips=get_bool(json_object, "show_tips", default=True),
         )
 ```
 
@@ -95,9 +95,9 @@ from dataclasses import dataclass
 from jcl import (
     JsonObject,
     JsonObjectConvertible,
-    require_bool_from_json_object,
-    require_int_from_json_object,
-    require_str_from_json_object,
+    require_bool,
+    require_int,
+    require_str,
 )
 
 @dataclass
@@ -116,9 +116,9 @@ class User(JsonObjectConvertible):
     @classmethod
     def from_json_object(cls, json_object: JsonObject, *, ctx=None) -> "User":
         return cls(
-            name=require_str_from_json_object(json_object, "name", ctx=ctx),
-            age=require_int_from_json_object(json_object, "age", ctx=ctx),
-            active=require_bool_from_json_object(json_object, "active", ctx=ctx),
+            name=require_str(json_object, "name", ctx=ctx),
+            age=require_int(json_object, "age", ctx=ctx),
+            active=require_bool(json_object, "active", ctx=ctx),
         )
 ```
 
@@ -133,9 +133,9 @@ from jcl import (
     JsonObject,
     JsonObjectConvertible,
     convert_convertibles_to_json_objects,
-    get_convertible_from_json_object,
-    get_convertibles_from_json_object,
-    get_str_from_json_object,
+    get_convertible,
+    get_convertibles,
+    get_str,
 )
 
 @dataclass
@@ -152,8 +152,8 @@ class Address(JsonObjectConvertible):
     @classmethod
     def from_json_object(cls, json_object: JsonObject, *, ctx=None) -> "Address":
         return cls(
-            city=get_str_from_json_object(json_object, "city", default=""),
-            country=get_str_from_json_object(json_object, "country", default=""),
+            city=get_str(json_object, "city", default=""),
+            country=get_str(json_object, "country", default=""),
         )
 
 @dataclass
@@ -168,7 +168,7 @@ class Tag(JsonObjectConvertible):
     @classmethod
     def from_json_object(cls, json_object: JsonObject, *, ctx=None) -> "Tag":
         return cls(
-            name=get_str_from_json_object(json_object, "name", default=""),
+            name=get_str(json_object, "name", default=""),
         )
 
 @dataclass
@@ -187,15 +187,15 @@ class User(JsonObjectConvertible):
     @classmethod
     def from_json_object(cls, json_object: JsonObject, *, ctx=None) -> "User":
         return cls(
-            name=get_str_from_json_object(json_object, "name", default=""),
-            address=get_convertible_from_json_object(
+            name=get_str(json_object, "name", default=""),
+            address=get_convertible(
                 json_object,
                 "address",
                 Address,
                 Address,
                 ctx=ctx,
             ),
-            tags=get_convertibles_from_json_object(
+            tags=get_convertibles(
                 json_object,
                 "tags",
                 Tag,
