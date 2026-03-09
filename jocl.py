@@ -1,3 +1,4 @@
+import abc
 import json
 import math
 import pathlib
@@ -171,26 +172,41 @@ def _resolve_json_value_context(ctx: object = None) -> JsonValueContext:
     return ctx
 
 T_JsonObjectConvertible = TypeVar("T_JsonObjectConvertible", bound="JsonObjectConvertible")
-class JsonObjectConvertible(Protocol):
-    """Protocol for objects that can be converted to and from JSON objects."""
-    def to_json_object(self) -> JsonObject:
-        """Converts the convertible to a JSON object.
-
-        Returns:
-            The JSON object representation of the convertible.
-        """
-        ...
+class JsonObjectConvertible(abc.ABC):
+    """Abstract base class for types that convert to and from JSON objects."""
 
     @classmethod
+    @abc.abstractmethod
     def from_json_object(cls: type[T_JsonObjectConvertible], json_object: JsonObject, *, ctx: Optional[JsonValueContext] = None) -> T_JsonObjectConvertible:
-        """Creates a convertible from a JSON object.
+        """Creates an instance from a JSON object.
 
         Args:
             json_object: Source JSON object.
-            ctx: Optional context for path-aware validation and error reporting.
+            ctx: Optional validation/deserialization context.
 
         Returns:
-            The deserialized convertible.
+            A newly constructed instance.
+
+        Raises:
+            JsonValueError: Raised when required JSON data is missing or invalid.
+            TypeError: Raised when ``ctx`` is invalid or when deserialization encounters a type-related error.
+            ValueError: Raised when deserialization encounters a value-related error.
+        """
+        ...
+
+    @abc.abstractmethod
+    def to_json_object(self, *, ctx: Optional[JsonValueContext] = None) -> JsonObject:
+        """Converts this instance to a JSON object.
+
+        Args:
+            ctx: Optional validation/serialization context.
+
+        Returns:
+            A JSON-compatible object representation of this instance.
+
+        Raises:
+            TypeError: Raised when ``ctx`` is invalid or when serialization produces data that cannot be represented as a valid JSON object.
+            ValueError: Raised when serialization encounters an invalid value.
         """
         ...
 
@@ -430,7 +446,8 @@ def validate_json_array(x: object, *, ctx: Optional[JsonValueContext] = None) ->
 def dump_convertible(convertible: JsonObjectConvertible, path: pathlib.Path, *, ctx: Optional[JsonValueContext] = None) -> None:
     """Writes a convertible to a UTF-8 JSON file.
 
-    The result of ``to_json_object()`` is validated before writing so that invalid JSON objects are rejected early.
+    The JSON object returned by ``to_json_object()`` is validated before writing so that invalid JSON objects are rejected early.
+    Exceptions raised directly by ``to_json_object()`` are propagated unchanged.
 
     Args:
         convertible: Convertible to write.
@@ -441,12 +458,12 @@ def dump_convertible(convertible: JsonObjectConvertible, path: pathlib.Path, *, 
         ``None``.
 
     Raises:
-        TypeError: Raised when serialization produces an invalid JSON object or when ``ctx`` is invalid.
+        TypeError: Raised when ``ctx`` is invalid or when the JSON object returned by ``to_json_object()`` is invalid.
         OSError: Raised when writing the file fails.
     """
     resolved_ctx: JsonValueContext = _resolve_json_value_context(ctx)
 
-    o: JsonObject = convertible.to_json_object()
+    o: JsonObject = convertible.to_json_object(ctx=resolved_ctx)
 
     try:
         validate_json_object(o, ctx=resolved_ctx)
@@ -859,7 +876,7 @@ def require_int(json_object: JsonObject, key: str, *, ctx: Optional[JsonValueCon
     resolved_ctx: JsonValueContext = _resolve_json_value_context(ctx)
     child_ctx: JsonValueContext = resolved_ctx.create_child(key)
 
-    value: object = _require_value(json_object, key, ctx=child_ctx)
+    value: object = _require_value(json_object, key, ctx=resolved_ctx)
 
     if not _is_strict_int(value):
         raise JsonValueError(f"Expected integer, got {type(value).__name__}", child_ctx.get_path())
@@ -887,7 +904,7 @@ def require_float(json_object: JsonObject, key: str, *, ctx: Optional[JsonValueC
     resolved_ctx: JsonValueContext = _resolve_json_value_context(ctx)
     child_ctx: JsonValueContext = resolved_ctx.create_child(key)
 
-    value: object = _require_value(json_object, key, ctx=child_ctx)
+    value: object = _require_value(json_object, key, ctx=resolved_ctx)
 
     if _is_strict_int(value):
         try:
@@ -1072,27 +1089,32 @@ def require_convertibles(json_object: JsonObject, key: str, cls: type[T_Converti
 
     return convertibles
 
-def convert_convertibles_to_json_objects(convertibles: Iterable[JsonObjectConvertible]) -> list[JsonObject]:
+def convert_convertibles_to_json_objects(convertibles: Iterable[JsonObjectConvertible], *, ctx: Optional[JsonValueContext] = None) -> list[JsonObject]:
     """Converts convertibles to JSON objects.
 
-    Each produced JSON object is validated with its element index as the root path so that failures point to the offending element.
+    Each produced JSON object is validated with its element index appended to ``ctx`` so that failures point to the offending element.
+    Exceptions raised directly by ``to_json_object()`` are propagated unchanged.
 
     Args:
         convertibles: Convertibles to serialize.
+        ctx: Optional validation context.
 
     Returns:
         A list of validated JSON objects.
 
     Raises:
-        TypeError: Raised when any element produces an invalid JSON object.
+        TypeError: Raised when ``ctx`` is invalid or when any element produces an invalid JSON object.
     """
+    resolved_ctx: JsonValueContext = _resolve_json_value_context(ctx)
+
     json_objects: list[JsonObject] = []
 
     for i, convertible in enumerate(convertibles):
-        json_object: JsonObject = convertible.to_json_object()
+        item_ctx: JsonValueContext = resolved_ctx.create_child(i)
+        json_object: JsonObject = convertible.to_json_object(ctx=item_ctx)
 
         try:
-            validate_json_object(json_object, ctx=JsonValueContext((i,)))
+            validate_json_object(json_object, ctx=item_ctx)
         except JsonValueError as e:
             raise TypeError(f"Invalid JSON produced by element {i} ({type(convertible).__name__}): {e}") from e
 
