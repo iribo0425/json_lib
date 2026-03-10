@@ -3,7 +3,7 @@ import json
 import math
 import pathlib
 from dataclasses import dataclass
-from typing import cast, ClassVar, Iterable, NoReturn, Protocol, TypeVar, Union
+from typing import cast, ClassVar, Iterable, NoReturn, Optional, Protocol, TypeVar, Union
 
 def _is_strict_int(x: object) -> bool:
     return type(x) is int
@@ -201,6 +201,16 @@ class JsonObjectConvertible(abc.ABC):
         """
         ...
 
+    @classmethod
+    @abc.abstractmethod
+    def create_default(cls: type[T_JsonObjectConvertible]) -> T_JsonObjectConvertible:
+        """Creates a default instance of this type.
+
+        Returns:
+            A newly created default instance.
+        """
+        ...
+
 T_Convertible = TypeVar("T_Convertible", bound=JsonObjectConvertible)
 
 def _escape_json_pointer_part(part: str) -> str:
@@ -271,7 +281,7 @@ class JsonValueError(ValueError):
 def validate_json_primitive(ctx: JsonValueContext, x: object) -> None:
     """Validates that a value is a JSON primitive.
 
-    Accepted values are ``None``, ``bool``, ``str``, integers, and finite floating-point values.
+    Accepted values are ``None``, ``bool``, ``str``, exact ``int`` objects, and finite ``float`` values.
 
     Args:
         ctx: Current path context.
@@ -523,7 +533,8 @@ def get_str(ctx: JsonValueContext, json_object: JsonObject, key: str, *, default
 def get_int(ctx: JsonValueContext, json_object: JsonObject, key: str, *, default: int = 0) -> int:
     """Gets an integer from a JSON object.
 
-    Booleans are rejected explicitly.
+    Only exact ``int`` objects are accepted.
+    ``bool`` and integer subclasses are rejected.
 
     Args:
         ctx: Current path context.
@@ -664,7 +675,7 @@ class Factory(Protocol[T_co]):
         """
         ...
 
-def get_object(ctx: JsonValueContext, json_object: JsonObject, key: str, *, default_factory: Factory[JsonObject] = dict) -> JsonObject:
+def get_object(ctx: JsonValueContext, json_object: JsonObject, key: str, *, default_factory: Factory[JsonObject] = default_json_object) -> JsonObject:
     """Gets a JSON object from a JSON object.
 
     Args:
@@ -690,7 +701,7 @@ def get_object(ctx: JsonValueContext, json_object: JsonObject, key: str, *, defa
 
     return cast(JsonObject, value)
 
-def get_array(ctx: JsonValueContext, json_object: JsonObject, key: str, *, default_factory: Factory[JsonArray] = list) -> JsonArray:
+def get_array(ctx: JsonValueContext, json_object: JsonObject, key: str, *, default_factory: Factory[JsonArray] = default_json_array) -> JsonArray:
     """Gets a JSON array from a JSON object.
 
     Args:
@@ -716,7 +727,7 @@ def get_array(ctx: JsonValueContext, json_object: JsonObject, key: str, *, defau
 
     return cast(JsonArray, value)
 
-def get_convertible(ctx: JsonValueContext, json_object: JsonObject, key: str, cls: type[T_Convertible], default_factory: Factory[T_Convertible]) -> T_Convertible:
+def get_convertible(ctx: JsonValueContext, json_object: JsonObject, key: str, cls: type[T_Convertible], *, default_factory: Optional[Factory[T_Convertible]] = None) -> T_Convertible:
     """Gets a convertible from a JSON object.
 
     Args:
@@ -725,14 +736,17 @@ def get_convertible(ctx: JsonValueContext, json_object: JsonObject, key: str, cl
         key: Key to read.
         cls: Target type to deserialize.
         default_factory: Factory used to create the default value.
+            If ``None``, ``cls.create_default`` is used.
 
     Returns:
-        The deserialized convertible, or a new default value if the key is missing, if the value is not a valid JSON object, or if deserialization fails.
+        The deserialized convertible, or a new default value if the key is missing,
+        if the value is not a valid JSON object, or if deserialization fails.
     """
     child_ctx: JsonValueContext = ctx.create_child(key)
+    factory: Factory[T_Convertible] = cls.create_default if default_factory is None else default_factory
 
     if key not in json_object:
-        return default_factory()
+        return factory()
 
     value: object = json_object[key]
 
@@ -740,7 +754,7 @@ def get_convertible(ctx: JsonValueContext, json_object: JsonObject, key: str, cl
         validate_json_object(child_ctx, value)
         return cls.from_json_object(child_ctx, cast(JsonObject, value))
     except (JsonValueError, TypeError, ValueError):
-        return default_factory()
+        return factory()
 
 def get_convertibles(ctx: JsonValueContext, json_object: JsonObject, key: str, cls: type[T_Convertible], *, default_factory: Factory[list[T_Convertible]] = list) -> list[T_Convertible]:
     """Gets a list of convertibles from a JSON object.
@@ -810,7 +824,8 @@ def require_str(ctx: JsonValueContext, json_object: JsonObject, key: str) -> str
 def require_int(ctx: JsonValueContext, json_object: JsonObject, key: str) -> int:
     """Gets a required integer from a JSON object.
 
-    Booleans are rejected explicitly.
+    Only exact ``int`` objects are accepted.
+    ``bool`` and integer subclasses are rejected.
 
     Args:
         ctx: Current path context.
