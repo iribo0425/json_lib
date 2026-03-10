@@ -95,16 +95,19 @@ def append_json_value_path_part(path: JsonValuePath, part: JsonValuePathPart) ->
     _validate_json_value_path_part(part)
     return path + (part,)
 
-def _validate_max_depth(x: object) -> int:
+def _validate_max_depth(x: object) -> None:
     if not _is_strict_int(x):
         raise TypeError(f"max_depth must be int, got {type(x).__name__}")
 
-    i: int = cast(int, x)
-
-    if i < 0:
+    if cast(int, x) < 0:
         raise ValueError(f"max_depth must be >= 0, got {x}")
 
-    return i
+def _validate_logger(x: object) -> None:
+    if x is None:
+        return
+
+    if not isinstance(x, logging.Logger):
+        raise TypeError(f"logger must be logging.Logger, got {type(x).__name__}")
 
 class JsonContext(object):
     """Stores path, maximum depth, and optional logging context for JSON handling."""
@@ -118,13 +121,14 @@ class JsonContext(object):
             logger: Optional logger used for fallback diagnostics.
 
         Raises:
-            TypeError: Raised when ``path`` or ``max_depth`` has an invalid type.
+            TypeError: Raised when ``path``, ``max_depth``, or ``logger`` has an invalid type.
             ValueError: Raised when ``max_depth`` is negative or when ``path`` contains an invalid part.
         """
         super(JsonContext, self).__init__()
 
         _validate_json_value_path(path)
         _validate_max_depth(max_depth)
+        _validate_logger(logger)
 
         self.__path: JsonValuePath = path
         self.__max_depth: int = max_depth
@@ -203,11 +207,38 @@ def _log_get_failure(ctx: JsonContext, reason: str, *, value: object = _MISSING_
             logger.warning("JSON get fallback at %s: %s", location, reason)
         else:
             logger.warning("JSON get fallback at %s: %s; exc_type=%s; exc=%s", location, reason, type(exc).__name__, exc)
+        return
+
+    max_length: int = 200
+
+    try:
+        value_repr: str = repr(value)
+    except Exception as e:
+        value_repr = f"<unrepresentable value ({type(e).__name__}: {e})>"
+
+    if len(value_repr) > max_length:
+        value_repr = value_repr[:max_length - 3] + "..."
+
+    value_type: str = type(value).__name__
+
+    if exc is None:
+        logger.warning(
+            "JSON get fallback at %s: %s; value_type=%s; value=%s",
+            location,
+            reason,
+            value_type,
+            value_repr,
+        )
     else:
-        if exc is None:
-            logger.warning("JSON get fallback at %s: %s; value=%r", location, reason, value)
-        else:
-            logger.warning("JSON get fallback at %s: %s; value=%r; exc_type=%s; exc=%s", location, reason, value, type(exc).__name__, exc)
+        logger.warning(
+            "JSON get fallback at %s: %s; value_type=%s; value=%s; exc_type=%s; exc=%s",
+            location,
+            reason,
+            value_type,
+            value_repr,
+            type(exc).__name__,
+            exc,
+        )
 
 T_JsonObjectConvertible = TypeVar("T_JsonObjectConvertible", bound="JsonObjectConvertible")
 class JsonObjectConvertible(abc.ABC):
@@ -291,7 +322,13 @@ class JsonError(ValueError):
         Args:
             reason: Human-readable description of the failure.
             path: Path at which the failure occurred.
+
+        Raises:
+            TypeError: Raised when ``path`` has an invalid type.
+            ValueError: Raised when ``path`` contains an invalid part.
         """
+        _validate_json_value_path(path)
+
         super(JsonError, self).__init__(reason)
 
         self.__path: JsonValuePath = path
@@ -436,7 +473,10 @@ def validate_json_value(ctx: JsonContext, x: object) -> None:
                 child_path: JsonValuePath = append_json_value_path_part(item.path, i)
                 stack.append(_StackItem(False, _StackItem.DUMMY_OID, array[i], item.depth + 1, child_path))
         else:
-            validate_json_primitive(JsonContext(item.path, ctx.get_max_depth()), item.value)
+            validate_json_primitive(
+                JsonContext(item.path, ctx.get_max_depth(), ctx.get_logger()),
+                item.value
+            )
 
 def validate_json_object(ctx: JsonContext, x: object) -> None:
     """Validates that a value is a JSON object.
