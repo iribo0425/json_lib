@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: 2026 Iribo
+# SPDX-License-Identifier: MIT
+
 import abc
 import json
 import logging
