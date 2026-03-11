@@ -237,10 +237,26 @@ def _validate_max_depth(x: object) -> None:
     if cast(int, x) < 0:
         raise ValueError(f"max_depth must be >= 0, got {x}")
 
-class JsonContext(object):
-    """Stores the current JSON path, maximum validation depth, and a shared issue buffer."""
+def _validate_max_issue_value_repr_length(x: object) -> None:
+    if x is None:
+        return
 
-    def __init__(self, path: JsonValuePath = default_json_value_path(), max_depth: int = 1000, issues: Optional[list[JsonIssue]] = None):
+    if not _is_strict_int(x):
+        raise TypeError(f"max_issue_value_repr_length must be int or None, got {type(x).__name__}")
+
+    if cast(int, x) < 0:
+        raise ValueError(f"max_issue_value_repr_length must be >= 0, got {x}")
+
+class JsonContext(object):
+    """Stores the current JSON path, maximum validation depth, issue formatting settings, and a shared issue buffer."""
+
+    def __init__(
+        self,
+        path: JsonValuePath = default_json_value_path(),
+        max_depth: int = 1000,
+        issues: Optional[list[JsonIssue]] = None,
+        max_issue_value_repr_length: Optional[int] = 200,
+    ):
         """Initializes a JSON context.
 
         Args:
@@ -248,16 +264,22 @@ class JsonContext(object):
             max_depth: Maximum allowed nesting depth for JSON values.
             issues: Shared issue buffer used to collect non-fatal JSON issues.
                 If ``None``, a new empty buffer is created.
+            max_issue_value_repr_length: Maximum length of ``JsonIssue.value_repr``.
+                If ``None``, value representations are not truncated.
 
         Raises:
-            TypeError: Raised when ``path`` or ``max_depth`` has an invalid type,
-                or when ``issues`` contains a non-``JsonIssue`` entry.
-            ValueError: Raised when ``max_depth`` is negative or when ``path`` contains an invalid part.
+            TypeError: Raised when ``path``, ``max_depth``, or
+                ``max_issue_value_repr_length`` has an invalid type, or when
+                ``issues`` contains a non-``JsonIssue`` entry.
+            ValueError: Raised when ``max_depth`` is negative, when
+                ``max_issue_value_repr_length`` is negative, or when ``path``
+                contains an invalid part.
         """
         super(JsonContext, self).__init__()
 
         _validate_json_value_path(path)
         _validate_max_depth(max_depth)
+        _validate_max_issue_value_repr_length(max_issue_value_repr_length)
 
         if issues is None:
             issues = []
@@ -268,6 +290,7 @@ class JsonContext(object):
         self.__path: JsonValuePath = path
         self.__max_depth: int = max_depth
         self.__issues: list[JsonIssue] = issues
+        self.__max_issue_value_repr_length: Optional[int] = max_issue_value_repr_length
 
     def get_path(self) -> JsonValuePath:
         """Returns the current JSON path."""
@@ -280,6 +303,10 @@ class JsonContext(object):
     def get_issues(self) -> list[JsonIssue]:
         """Returns the shared issue buffer."""
         return self.__issues
+
+    def get_max_issue_value_repr_length(self) -> Optional[int]:
+        """Returns the maximum length used for issue value representations."""
+        return self.__max_issue_value_repr_length
 
     def add_issue(self, issue: JsonIssue) -> None:
         """Appends an issue to the shared issue buffer.
@@ -300,7 +327,8 @@ class JsonContext(object):
     def create_child(self, path_part: JsonValuePathPart) -> "JsonContext":
         """Creates a child context for a nested path part.
 
-        The child context inherits the current maximum depth and shared issue buffer.
+        The child context inherits the current maximum depth, issue formatting
+        settings, and shared issue buffer.
 
         Args:
             path_part: Object key or array index to append to the current path.
@@ -316,6 +344,7 @@ class JsonContext(object):
             path=append_json_value_path_part(self.get_path(), path_part),
             max_depth=self.get_max_depth(),
             issues=self.get_issues(),
+            max_issue_value_repr_length=self.get_max_issue_value_repr_length(),
         )
 
 _MISSING_ISSUE_VALUE: object = object()
@@ -349,8 +378,14 @@ def _record_get_issue(
         except Exception as e:
             value_repr = f"<unrepresentable value ({type(e).__name__}: {e})>"
 
-        if len(value_repr) > 200:
-            value_repr = value_repr[:197] + "..."
+        max_length: Optional[int] = ctx.get_max_issue_value_repr_length()
+
+        if ((max_length is not None)
+            and (len(value_repr) > max_length)):
+            if max_length <= 3:
+                value_repr = value_repr[:max_length]
+            else:
+                value_repr = value_repr[:max_length - 3] + "..."
 
     exception_type_name: Optional[str] = None
     exception_message: Optional[str] = None
@@ -470,19 +505,11 @@ class JsonError(ValueError):
         self.__path: JsonValuePath = path
 
     def get_path(self) -> JsonValuePath:
-        """Returns the path associated with the error.
-
-        Returns:
-            The stored path.
-        """
+        """Returns the path associated with the error."""
         return self.__path
 
     def __str__(self) -> str:
-        """Formats the error with its path.
-
-        Returns:
-            A message that includes both the failure reason and a JSON Pointer-like path.
-        """
+        """Returns the error message including the path."""
         reason: str = _get_exception_reason(self)
 
         try:
@@ -626,7 +653,15 @@ def validate_json_value(ctx: JsonContext, x: object) -> None:
                 stack.append(_StackItem(False, _StackItem.DUMMY_OID, array[i], item.get_depth() + 1, child_path))
 
         else:
-            validate_json_primitive(JsonContext(item.get_path(), ctx.get_max_depth(), ctx.get_issues()), item.get_value())
+            validate_json_primitive(
+                JsonContext(
+                    path=item.get_path(),
+                    max_depth=ctx.get_max_depth(),
+                    issues=ctx.get_issues(),
+                    max_issue_value_repr_length=ctx.get_max_issue_value_repr_length()
+                ),
+                item.get_value()
+            )
 
 def validate_json_object(ctx: JsonContext, x: object) -> None:
     """Validates that a value is a JSON object.
@@ -930,11 +965,7 @@ class Factory(Protocol[T_co]):
     """Protocol for zero-argument factories that create default values."""
 
     def __call__(self) -> T_co:
-        """Creates a default value.
-
-        Returns:
-            A newly created default value.
-        """
+        """Creates a default value."""
         ...
 
 def get_object(ctx: JsonContext, json_object: JsonObject, key: str, *, default_factory: Factory[JsonObject] = default_json_object) -> JsonObject:
