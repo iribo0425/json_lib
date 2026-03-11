@@ -188,7 +188,7 @@ class JsonIssue(object):
         _validate_json_value_path(prefix)
         return self.__path[:len(prefix)] == prefix
 
-    def to_message(self) -> str:
+    def to_full_message(self) -> str:
         """Formats the issue as a human-readable message."""
         parts: list[str] = [
             f"JSON issue at {self.get_pointer()}: {self.__message}",
@@ -224,7 +224,7 @@ class JsonIssue(object):
         )
 
     def __str__(self) -> str:
-        return self.to_message()
+        return self.to_full_message()
 
 def _validate_json_issue(x: object) -> None:
     if not isinstance(x, JsonIssue):
