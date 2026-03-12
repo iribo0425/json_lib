@@ -29,7 +29,6 @@ from jocl import (
     load_convertible,
 )
 
-
 @dataclass
 class User(JsonObjectConvertible):
     name: str = ""
@@ -51,7 +50,6 @@ class User(JsonObjectConvertible):
     @classmethod
     def create_default(cls) -> "User":
         return cls()
-
 
 ctx = JsonContext()
 user = User(name="Alice", age=30)
