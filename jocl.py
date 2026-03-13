@@ -1309,6 +1309,410 @@ def get_str_enum(ctx: JsonContext, json_object: JsonObject, key: str, cls: type[
         _record_get_issue(child_ctx, JsonIssueCode.INVALID_VALUE, f"Invalid {cls.__name__} value: {value!r}", value=value, exc=e)
         return default
 
+
+class GetIssueInfo(object):
+    def __init__(self,
+        path: JsonValuePath,
+        code: JsonIssueCode,
+        message: str,
+        value: object,
+        exc: Optional[BaseException] = None):
+
+        super(GetIssueInfo, self).__init__()
+
+        self.__path: JsonValuePath = path
+        self.__code: JsonIssueCode = code
+        self.__message: str = message
+        self.__value: object = value
+        self.__exc: Optional[BaseException] = exc
+
+
+    def get_path(self) -> JsonValuePath:
+        return self.__path
+
+
+    def get_code(self) -> JsonIssueCode:
+        return self.__code
+
+
+    def get_message(self) -> str:
+        return self.__message
+
+
+    def get_value(self) -> object:
+        return self.__value
+
+
+    def get_exc(self) -> Optional[BaseException]:
+        return self.__exc
+
+
+    def __repr__(self) -> str:
+        return (
+            f"{type(self).__name__}("
+            f"path={self.__path!r}, "
+            f"code={self.__code!r}, "
+            f"message={self.__message!r}, "
+            f"value={self.__value!r}, "
+            f"exc={self.__exc!r})"
+        )
+
+
+def _normalize_type_or_types(type_or_types: object) -> tuple[object, ...]:
+    if isinstance(type_or_types, tuple):
+        return cast(tuple[object, ...], type_or_types)
+
+    return (type_or_types,)
+
+
+_MISSING_DEFAULT: object = object()
+
+
+class ArrayOf(object):
+    def __init__(self, *element_types: object):
+        if not element_types:
+            raise ValueError("ArrayOf requires at least one element type")
+
+        self.__element_types: object = element_types[0] if len(element_types) == 1 else element_types
+
+
+    def get_element_types(self) -> object:
+        return self.__element_types
+
+
+    def __repr__(self) -> str:
+        return f"ArrayOf({self.__element_types!r})"
+
+
+class ValuesOf(object):
+    def __init__(self, *value_types: object):
+        if not value_types:
+            raise ValueError("ValuesOf requires at least one value type")
+
+        self.__value_types: object = value_types[0] if len(value_types) == 1 else value_types
+
+
+    def get_value_types(self) -> object:
+        return self.__value_types
+
+
+    def __repr__(self) -> str:
+        return f"ValuesOf({self.__value_types!r})"
+
+
+def _resolve_default_value(default: object, types: tuple[object, ...]) -> object:
+    if default is not _MISSING_DEFAULT:
+        if callable(default):
+            return cast(Factory[object], default)()
+        return default
+
+    first_type: object = types[0]
+
+    if isinstance(first_type, ArrayOf):
+        return []
+
+    if isinstance(first_type, ValuesOf):
+        return {}
+
+    if first_type is str:
+        return ""
+
+    if first_type is int:
+        return 0
+
+    if first_type is float:
+        return 0.0
+
+    if first_type is bool:
+        return False
+
+    if first_type is JsonPrimitive:
+        return default_json_primitive()
+
+    if first_type is JsonObject:
+        return default_json_object()
+
+    if first_type is JsonArray:
+        return default_json_array()
+
+    if first_type is JsonValue:
+        return default_json_value()
+
+    if isinstance(first_type, type) and issubclass(first_type, JsonObjectConvertible):
+        return first_type.create_default()
+
+    raise TypeError(f"Unsupported get type: {first_type!r}")
+
+
+def _try_read_value_as_types(ctx: JsonContext, value: object, types: tuple[object, ...]) -> tuple[bool, object, Optional[GetIssueInfo]]:
+    if not types:
+        raise ValueError("types must not be empty")
+
+    if len(types) > 1:
+        errors: list[GetIssueInfo] = []
+
+        for t in types:
+            ok, result, error = _try_read_value_as_types(ctx, value, (t,))
+
+            if ok:
+                return True, result, None
+
+            if error is not None:
+                errors.append(error)
+
+        best_error: Optional[GetIssueInfo] = None
+
+        for error in errors:
+            if best_error is None:
+                best_error = error
+                continue
+
+            if len(error.get_path()) > len(best_error.get_path()):
+                best_error = error
+                continue
+
+            if ((len(error.get_path()) == len(best_error.get_path()))
+                and (best_error.get_code() == JsonIssueCode.INVALID_TYPE)
+                and (error.get_code() != JsonIssueCode.INVALID_TYPE)):
+                best_error = error
+
+        if best_error is None:
+            raise AssertionError("Unreachable: type candidates produced no result and no error")
+
+        if len(best_error.get_path()) > len(ctx.get_path()):
+            return False, None, best_error
+
+        expected_type_names: list[str] = []
+
+        for t in types:
+            if isinstance(t, ArrayOf):
+                expected_type_names.append(f"ArrayOf({t.get_element_types()!r})")
+
+            elif isinstance(t, ValuesOf):
+                expected_type_names.append(f"ValuesOf({t.get_value_types()!r})")
+
+            elif t is str:
+                expected_type_names.append("string")
+
+            elif t is int:
+                expected_type_names.append("integer")
+
+            elif t is float:
+                expected_type_names.append("number")
+
+            elif t is bool:
+                expected_type_names.append("boolean")
+
+            elif t is JsonPrimitive:
+                expected_type_names.append("JsonPrimitive")
+
+            elif t is JsonObject:
+                expected_type_names.append("JsonObject")
+
+            elif t is JsonArray:
+                expected_type_names.append("JsonArray")
+
+            elif t is JsonValue:
+                expected_type_names.append("JsonValue")
+
+            elif isinstance(t, type) and issubclass(t, JsonObjectConvertible):
+                expected_type_names.append(t.__name__)
+
+            else:
+                expected_type_names.append(repr(t))
+
+        return (
+            False,
+            None,
+            GetIssueInfo(
+                ctx.get_path(),
+                JsonIssueCode.INVALID_TYPE,
+                f"Expected one of {' | '.join(expected_type_names)}, got {type(value).__name__}",
+                value,
+            ),
+        )
+
+    expected_type: object = types[0]
+
+    if isinstance(expected_type, ArrayOf):
+        try:
+            validate_json_array(ctx, value)
+
+        except JsonError as e:
+            issue_code: JsonIssueCode = JsonIssueCode.INVALID_TYPE if e.get_path() == ctx.get_path() else JsonIssueCode.INVALID_VALUE
+            issue_value: object = value if e.get_path() == ctx.get_path() else _MISSING_ISSUE_VALUE
+            return False, None, GetIssueInfo(e.get_path(), issue_code, _get_exception_reason(e), issue_value, e)
+
+        out: list[object] = []
+
+        for i, item in enumerate(cast(JsonArray, value)):
+            ok, result, error = _try_read_value_as_types(ctx.create_child(i), item, _normalize_type_or_types(expected_type.get_element_types()))
+
+            if not ok:
+                return False, None, error
+
+            out.append(result)
+
+        return True, out, None
+
+    if isinstance(expected_type, ValuesOf):
+        try:
+            validate_json_object(ctx, value)
+
+        except JsonError as e:
+            issue_code = JsonIssueCode.INVALID_TYPE if e.get_path() == ctx.get_path() else JsonIssueCode.INVALID_VALUE
+            issue_value = value if e.get_path() == ctx.get_path() else _MISSING_ISSUE_VALUE
+            return False, None, GetIssueInfo(e.get_path(), issue_code, _get_exception_reason(e), issue_value, e)
+
+        out: dict[str, object] = {}
+
+        for k, item in cast(JsonObject, value).items():
+            ok, result, error = _try_read_value_as_types(ctx.create_child(k), item, _normalize_type_or_types(expected_type.get_value_types()))
+
+            if not ok:
+                return False, None, error
+
+            out[k] = result
+
+        return True, out, None
+
+    if expected_type is str:
+        if not isinstance(value, str):
+            return False, None, GetIssueInfo(ctx.get_path(), JsonIssueCode.INVALID_TYPE, f"Expected string, got {type(value).__name__}", value)
+
+        return True, value, None
+
+    if expected_type is int:
+        if not _is_strict_int(value):
+            return False, None, GetIssueInfo(ctx.get_path(), JsonIssueCode.INVALID_TYPE, f"Expected integer, got {type(value).__name__}", value)
+
+        return True, cast(int, value), None
+
+    if expected_type is float:
+        if _is_strict_int(value):
+            try:
+                return True, float(cast(int, value)), None
+
+            except OverflowError as e:
+                return False, None, GetIssueInfo(ctx.get_path(), JsonIssueCode.VALUE_CONVERSION_FAILED, "Integer too large to convert to float", value, e)
+
+        if isinstance(value, float):
+            if math.isfinite(value):
+                return True, value, None
+
+            return False, None, GetIssueInfo(ctx.get_path(), JsonIssueCode.INVALID_VALUE, "Non-finite float", value)
+
+        return False, None, GetIssueInfo(ctx.get_path(), JsonIssueCode.INVALID_TYPE, f"Expected number, got {type(value).__name__}", value)
+
+    if expected_type is bool:
+        if not isinstance(value, bool):
+            return False, None, GetIssueInfo(ctx.get_path(), JsonIssueCode.INVALID_TYPE, f"Expected boolean, got {type(value).__name__}", value)
+
+        return True, value, None
+
+    if expected_type is JsonPrimitive:
+        try:
+            validate_json_primitive(ctx, value)
+
+        except JsonError as e:
+            issue_code = JsonIssueCode.INVALID_TYPE if e.get_path() == ctx.get_path() else JsonIssueCode.INVALID_VALUE
+            issue_value = value if e.get_path() == ctx.get_path() else _MISSING_ISSUE_VALUE
+            return False, None, GetIssueInfo(e.get_path(), issue_code, _get_exception_reason(e), issue_value, e)
+
+        return True, cast(JsonPrimitive, value), None
+
+    if expected_type is JsonObject:
+        try:
+            validate_json_object(ctx, value)
+
+        except JsonError as e:
+            issue_code = JsonIssueCode.INVALID_TYPE if e.get_path() == ctx.get_path() else JsonIssueCode.INVALID_VALUE
+            issue_value = value if e.get_path() == ctx.get_path() else _MISSING_ISSUE_VALUE
+            return False, None, GetIssueInfo(e.get_path(), issue_code, _get_exception_reason(e), issue_value, e)
+
+        return True, cast(JsonObject, value), None
+
+    if expected_type is JsonArray:
+        try:
+            validate_json_array(ctx, value)
+
+        except JsonError as e:
+            issue_code = JsonIssueCode.INVALID_TYPE if e.get_path() == ctx.get_path() else JsonIssueCode.INVALID_VALUE
+            issue_value = value if e.get_path() == ctx.get_path() else _MISSING_ISSUE_VALUE
+            return False, None, GetIssueInfo(e.get_path(), issue_code, _get_exception_reason(e), issue_value, e)
+
+        return True, cast(JsonArray, value), None
+
+    if expected_type is JsonValue:
+        try:
+            validate_json_value(ctx, value)
+
+        except JsonError as e:
+            issue_code = JsonIssueCode.INVALID_TYPE if e.get_path() == ctx.get_path() else JsonIssueCode.INVALID_VALUE
+            issue_value = value if e.get_path() == ctx.get_path() else _MISSING_ISSUE_VALUE
+            return False, None, GetIssueInfo(e.get_path(), issue_code, _get_exception_reason(e), issue_value, e)
+
+        return True, cast(JsonValue, value), None
+
+    if isinstance(expected_type, type) and issubclass(expected_type, JsonObjectConvertible):
+        try:
+            validate_json_object(ctx, value)
+
+        except JsonError as e:
+            issue_code = JsonIssueCode.INVALID_TYPE if e.get_path() == ctx.get_path() else JsonIssueCode.INVALID_VALUE
+            issue_value = value if e.get_path() == ctx.get_path() else _MISSING_ISSUE_VALUE
+            return False, None, GetIssueInfo(e.get_path(), issue_code, _get_exception_reason(e), issue_value, e)
+
+        try:
+            return True, expected_type.from_json_object(ctx, cast(JsonObject, value)), None
+
+        except JsonError as e:
+            issue_value = value if e.get_path() == ctx.get_path() else _MISSING_ISSUE_VALUE
+            return False, None, GetIssueInfo(e.get_path(), JsonIssueCode.INVALID_VALUE, _get_exception_reason(e), issue_value, e)
+
+        except (TypeError, ValueError) as e:
+            return False, None, GetIssueInfo(ctx.get_path(), JsonIssueCode.DESERIALIZATION_FAILED, f"Failed to deserialize {expected_type.__name__}", value, e)
+
+    raise TypeError(f"Unsupported get type: {expected_type!r}")
+
+
+def get(ctx: JsonContext, json_object: JsonObject, key: str, type_or_types: object, *, default: object = _MISSING_DEFAULT) -> object:
+    child_ctx: JsonContext = ctx.create_child(key)
+    types: tuple[object, ...] = _normalize_type_or_types(type_or_types)
+
+    if not types:
+        raise ValueError("type_or_types must not be empty")
+
+    if key not in json_object:
+        _record_get_issue(child_ctx, JsonIssueCode.MISSING_KEY, "Missing key")
+        return _resolve_default_value(default, types)
+
+    ok, result, error = _try_read_value_as_types(child_ctx, json_object[key], types)
+
+    if ok:
+        return result
+
+    if error is None:
+        raise AssertionError("Unreachable: typed read failed without error information")
+
+    error_ctx: JsonContext = JsonContext(
+        path=error.get_path(),
+        max_depth=ctx.get_max_depth(),
+        issues=ctx.get_issues(),
+        max_issue_value_repr_length=ctx.get_max_issue_value_repr_length(),
+    )
+
+    _record_get_issue(
+        error_ctx,
+        error.get_code(),
+        error.get_message(),
+        value=error.get_value(),
+        exc=error.get_exc(),
+    )
+
+    return _resolve_default_value(default, types)
+
+
 def _require_value(ctx: JsonContext, json_object: JsonObject, key: str) -> object:
     child_ctx: JsonContext = ctx.create_child(key)
 
