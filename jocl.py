@@ -564,9 +564,6 @@ class JsonError(ValueError):
 
         return f"{reason} at {at}"
 
-T_IntEnum = TypeVar("T_IntEnum", bound=enum.IntEnum)
-T_StrEnum = TypeVar("T_StrEnum", bound=StrEnum)
-
 def validate_json_primitive(ctx: JsonContext, x: object) -> None:
     """Validates that a value is a JSON primitive.
 
@@ -961,6 +958,18 @@ def _resolve_default_value(default: object, types: tuple[object, ...]) -> object
     if first_type is JsonValue:
         return default_json_value()
 
+    if isinstance(first_type, type) and issubclass(first_type, enum.IntEnum):
+        try:
+            return next(iter(first_type))
+        except StopIteration:
+            raise TypeError(f"Cannot infer default for empty enum: {first_type!r}")
+
+    if isinstance(first_type, type) and issubclass(first_type, StrEnum):
+        try:
+            return next(iter(first_type))
+        except StopIteration:
+            raise TypeError(f"Cannot infer default for empty enum: {first_type!r}")
+
     if isinstance(first_type, type) and issubclass(first_type, JsonObjectConvertible):
         return first_type.create_default()
 
@@ -1037,6 +1046,12 @@ def _try_read_value_as_types(ctx: JsonContext, value: object, types: tuple[objec
 
             elif t is JsonValue:
                 expected_type_names.append("JsonValue")
+
+            elif isinstance(t, type) and issubclass(t, enum.IntEnum):
+                expected_type_names.append(t.__name__)
+
+            elif isinstance(t, type) and issubclass(t, StrEnum):
+                expected_type_names.append(t.__name__)
 
             elif isinstance(t, type) and issubclass(t, JsonObjectConvertible):
                 expected_type_names.append(t.__name__)
@@ -1176,6 +1191,51 @@ def _try_read_value_as_types(ctx: JsonContext, value: object, types: tuple[objec
             return False, None, GetIssueInfo(e.get_path(), issue_code, _get_exception_reason(e), issue_value, e)
 
         return True, cast(JsonValue, value), None
+
+    if isinstance(expected_type, type) and issubclass(expected_type, enum.IntEnum):
+        if not _is_strict_int(value):
+            issue_info: GetIssueInfo = GetIssueInfo(
+                ctx.get_path(),
+                JsonIssueCode.INVALID_TYPE,
+                f"Expected integer for {expected_type.__name__}, got {type(value).__name__}",
+                value
+            )
+
+            return False, None, issue_info
+
+        try:
+            return True, expected_type(cast(int, value)), None
+        except ValueError as e:
+            issue_info: GetIssueInfo = GetIssueInfo(
+                ctx.get_path(),
+                JsonIssueCode.INVALID_VALUE,
+                f"Invalid {expected_type.__name__} value: {value!r}",
+                value,
+                e)
+
+            return False, None, issue_info
+
+    if isinstance(expected_type, type) and issubclass(expected_type, StrEnum):
+        if not isinstance(value, str):
+            issue_info: GetIssueInfo = GetIssueInfo(
+                ctx.get_path(),
+                JsonIssueCode.INVALID_TYPE,
+                f"Expected string for {expected_type.__name__}, got {type(value).__name__}",
+                value)
+
+            return False, None, issue_info
+
+        try:
+            return True, expected_type(value), None
+        except ValueError as e:
+            issue_info: GetIssueInfo = GetIssueInfo(
+                ctx.get_path(),
+                JsonIssueCode.INVALID_VALUE,
+                f"Invalid {expected_type.__name__} value: {value!r}",
+                value,
+                e)
+
+            return False, None, issue_info
 
     if isinstance(expected_type, type) and issubclass(expected_type, JsonObjectConvertible):
         try:
