@@ -1225,7 +1225,7 @@ def _try_read_value_as_types(ctx: JsonContext, value: object, types: tuple[objec
                 expected_type_names.append(t.__name__)
 
             else:
-                expected_type_names.append(repr(t))
+                expected_type_names.append(repr(cast(object, t)))
 
         return (
             False,
@@ -1238,7 +1238,11 @@ def _try_read_value_as_types(ctx: JsonContext, value: object, types: tuple[objec
             ),
         )
 
+    if len(types) != 1:
+        raise AssertionError("Unreachable: expected exactly one type candidate")
+
     expected_type: object = types[0]
+
     use_shallow_validation: bool = ctx.get_use_shallow_validation()
 
     if isinstance(expected_type, ArrayOf):
@@ -1253,7 +1257,7 @@ def _try_read_value_as_types(ctx: JsonContext, value: object, types: tuple[objec
             issue_value: object = value if e.get_path() == ctx.get_path() else _MISSING_ISSUE_VALUE
             return False, None, _GetIssueInfo(e.get_path(), issue_code, _get_exception_reason(e), issue_value, e)
 
-        out: list[object] = []
+        out_array: list[object] = []
 
         for i, item in enumerate(cast(JsonArray, value)):
             ok, result, error = _try_read_value_as_types(
@@ -1265,9 +1269,9 @@ def _try_read_value_as_types(ctx: JsonContext, value: object, types: tuple[objec
             if not ok:
                 return False, None, error
 
-            out.append(result)
+            out_array.append(result)
 
-        return True, out, None
+        return True, out_array, None
 
     if isinstance(expected_type, ValuesOf):
         try:
@@ -1281,7 +1285,7 @@ def _try_read_value_as_types(ctx: JsonContext, value: object, types: tuple[objec
             issue_value: object = value if e.get_path() == ctx.get_path() else _MISSING_ISSUE_VALUE
             return False, None, _GetIssueInfo(e.get_path(), issue_code, _get_exception_reason(e), issue_value, e)
 
-        out: dict[str, object] = {}
+        out_object: dict[str, object] = {}
 
         for k, item in cast(JsonObject, value).items():
             ok, result, error = _try_read_value_as_types(
@@ -1293,9 +1297,9 @@ def _try_read_value_as_types(ctx: JsonContext, value: object, types: tuple[objec
             if not ok:
                 return False, None, error
 
-            out[k] = result
+            out_object[k] = result
 
-        return True, out, None
+        return True, out_object, None
 
     if expected_type is str:
         if not isinstance(value, str):
