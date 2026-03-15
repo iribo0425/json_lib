@@ -118,8 +118,8 @@ class Address(JsonObjectConvertible):
     @classmethod
     def from_json_object(cls, ctx: JsonContext, json_object: JsonObject) -> "Address":
         return cls(
-            city=get(ctx, json_object, "city", str, default=""),
-            country=get(ctx, json_object, "country", str, default=""),
+            city=get(ctx, json_object, "city", str),
+            country=get(ctx, json_object, "country", str),
         )
 
     @classmethod
@@ -139,7 +139,7 @@ class Tag(JsonObjectConvertible):
     @classmethod
     def from_json_object(cls, ctx: JsonContext, json_object: JsonObject) -> "Tag":
         return cls(
-            name=get(ctx, json_object, "name", str, default=""),
+            name=get(ctx, json_object, "name", str),
         )
 
     @classmethod
@@ -165,8 +165,8 @@ class User(JsonObjectConvertible):
     @classmethod
     def from_json_object(cls, ctx: JsonContext, json_object: JsonObject) -> "User":
         return cls(
-            user_id=get(ctx, json_object, "user_id", (int, str), default=0),
-            name=get(ctx, json_object, "name", str, default=""),
+            user_id=get(ctx, json_object, "user_id", (int, str)),
+            name=get(ctx, json_object, "name", str),
             address=get(ctx, json_object, "address", Address),
             tags=get(ctx, json_object, "tags", ArrayOf(Tag)),
         )
